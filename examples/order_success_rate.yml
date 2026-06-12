@@ -1,0 +1,50 @@
+# Bronze-tier example context card — the README quick-start example as a
+# complete, validator-ready file. Try it:
+#   dbt-mc validate examples/order_success_rate.yml
+
+metrics:
+  - name: order_success_rate
+    type: derived
+    meta:
+      context:
+        purpose: "Share of transactions completing successfully, from auth through settlement"
+        business_question: "Is our payment processing performing normally?"
+        owner: "Payments Analytics"
+
+      expectations:
+        healthy_range: [0.94, 0.99]
+        warning_threshold: 0.92
+        critical_threshold: 0.89
+        seasonality: "Drops 2-3pp in late November due to Black Friday carrier volume"
+
+      investigation:
+        causal_dimensions:
+          - name: processor
+            why: "Single processor failures account for 80% of drops"
+            priority: 1
+          - name: region
+            why: "Regional outages are the second most common cause"
+            priority: 2
+        investigation_path: >
+          IF drop > 3pp: check processor breakdown first.
+          IF processor-specific: check region within processor.
+          IF all processors affected: check upstream auth service.
+
+      relationships:
+        correlates_with:
+          - metric: auth_approval_rate
+            relationship: "leading indicator — auth rate moves 15-30 min before success rate"
+        affected_by:
+          - event: "Major carrier outages"
+            impact: "Can drop 5-8pp for 2-4 hours"
+
+      decisions:
+        when_this_drops:
+          - threshold: 0.92
+            action: "Page payments-oncall. Check processor dashboard."
+          - threshold: 0.89
+            action: "Escalate to VP Payments. Consider partner notifications."
+        business_rules:
+          - "Enterprise SLA requires >0.95 monthly average. Breach triggers credit."
+
+      last_validated: "2026-06-11"

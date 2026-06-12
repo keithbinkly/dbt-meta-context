@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dbt-meta-context-validator"
+version = "0.1.0"
+description = "Validate meta context blocks in dbt semantic model YAML"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+dependencies = [
+    "pyyaml>=6.0",
+    "click>=8.0",
+]
+
+[project.scripts]
+dbt-mc = "meta_context_validator.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
