@@ -2,6 +2,8 @@
 
 **Context cards for dbt metrics.** Encode business knowledge — thresholds, investigation paths, SLAs, metric relationships — directly in dbt MetricFlow YAML, so AI agents answer analytical questions accurately instead of confidently wrong.
 
+> **Layer 5 — decisions — separates a calibrated response from a calibrated-but-wrong one.**
+
 [![skills.sh](https://skills.sh/b/keithbinkly/dbt-meta-context)](https://skills.sh/keithbinkly/dbt-meta-context) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 **Using an agent?** Ask Claude Code, Codex, or Cursor to install the authoring skill from your project directory:
