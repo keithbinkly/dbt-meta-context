@@ -48,6 +48,34 @@ RECOMMENDED_FIELDS = {
     "_cross_cutting": ["last_validated"],
 }
 
+_MISSING = object()
+
+
+def _field_state(layer_data: dict, f: str) -> str:
+    """Classify a field as populated / explicit_null / empty / absent.
+
+    Distinguishing absent from explicit null matters: the Gap 1 workaround
+    (contract-scoped thresholds) *recommends* `warning_threshold: null` with the
+    registry documented in decisions.business_rules. An explicit null written to
+    that spec must not be scored as a missing Core field. Also treats 0 / 0.0 /
+    False as populated — they are real values, not gaps (a threshold of 0 is a
+    threshold).
+    """
+    v = layer_data.get(f, _MISSING)
+    if v is _MISSING:
+        return "absent"
+    if v is None:
+        return "explicit_null"
+    if isinstance(v, (str, list, dict)) and len(v) == 0:
+        return "empty"
+    return "populated"
+
+
+def _null_is_justified(meta: dict[str, Any]) -> bool:
+    """The Gap 1 workaround shape: expectations nulled out, with the external
+    source of truth documented in decisions.business_rules."""
+    return bool((meta.get("decisions") or {}).get("business_rules"))
+
 
 def validate_metric(metric_name: str, meta: dict[str, Any]) -> MetricResult:
     findings = []
@@ -55,18 +83,49 @@ def validate_metric(metric_name: str, meta: dict[str, Any]) -> MetricResult:
     # --- Bronze tier: Core fields ---
     bronze_pass = True
     for layer, fields in CORE_FIELDS.items():
-        layer_data = meta.get(layer, {})
+        # `or {}` — a whole layer set to explicit null must not crash the walk
+        layer_data = meta.get(layer) or {}
         for f in fields:
-            if not layer_data.get(f):
+            state = _field_state(layer_data, f)
+            if state == "populated":
+                continue
+            if state == "explicit_null" and layer == "expectations" and _null_is_justified(meta):
+                # Intentional null per the Gap 1 workaround: value is scoped
+                # externally (e.g. per contract/segment) and business_rules
+                # says where. Counts as present for tier purposes.
+                findings.append(Finding(
+                    level="info",
+                    rule="intentional_null",
+                    message=(
+                        f"{layer}.{f} is explicitly null with the external source "
+                        "documented in decisions.business_rules (Gap 1 pattern: "
+                        "contract-/segment-scoped values). Treated as present."
+                    ),
+                ))
+                continue
+            if state == "explicit_null":
                 findings.append(Finding(
                     level="error",
-                    rule="missing_core_field",
-                    message=f"Missing Core field: {layer}.{f} (required for Bronze tier)",
+                    rule="unjustified_null",
+                    message=(
+                        f"{layer}.{f} is explicitly null without justification. "
+                        "Nulled expectations are valid only when "
+                        "decisions.business_rules documents the external source of "
+                        "the values (Gap 1 workaround); other layers do not accept "
+                        "null. Populate the field or remove it."
+                    ),
                 ))
                 bronze_pass = False
+                continue
+            findings.append(Finding(
+                level="error",
+                rule="missing_core_field",
+                message=f"Missing Core field: {layer}.{f} (required for Bronze tier)",
+            ))
+            bronze_pass = False
 
     # --- Type checks (Bronze) ---
-    expectations = meta.get("expectations", {})
+    expectations = meta.get("expectations") or {}
     healthy_range = expectations.get("healthy_range")
     if healthy_range is not None:
         if (
@@ -81,7 +140,7 @@ def validate_metric(metric_name: str, meta: dict[str, Any]) -> MetricResult:
             ))
             bronze_pass = False
 
-    causal_dims = meta.get("investigation", {}).get("causal_dimensions", [])
+    causal_dims = (meta.get("investigation") or {}).get("causal_dimensions") or []
     if isinstance(causal_dims, list):
         for i, dim in enumerate(causal_dims):
             for key in ("name", "why", "priority"):
@@ -93,7 +152,7 @@ def validate_metric(metric_name: str, meta: dict[str, Any]) -> MetricResult:
                     ))
                     bronze_pass = False
 
-    correlates = meta.get("relationships", {}).get("correlates_with", [])
+    correlates = (meta.get("relationships") or {}).get("correlates_with") or []
     if isinstance(correlates, list):
         for i, c in enumerate(correlates):
             if "relationship" not in c or not c.get("relationship"):
@@ -104,7 +163,7 @@ def validate_metric(metric_name: str, meta: dict[str, Any]) -> MetricResult:
                 ))
                 bronze_pass = False
 
-    when_drops = meta.get("decisions", {}).get("when_this_drops", [])
+    when_drops = (meta.get("decisions") or {}).get("when_this_drops") or []
     if isinstance(when_drops, list):
         for i, w in enumerate(when_drops):
             for key in ("threshold", "action"):
@@ -118,7 +177,7 @@ def validate_metric(metric_name: str, meta: dict[str, Any]) -> MetricResult:
 
     # --- False confidence check ---
     has_expectations = bool(expectations.get("healthy_range") or expectations.get("warning_threshold"))
-    has_business_rules = bool(meta.get("decisions", {}).get("business_rules"))
+    has_business_rules = _null_is_justified(meta)
     if has_expectations and not has_business_rules:
         findings.append(Finding(
             level="warning",
@@ -143,9 +202,9 @@ def validate_metric(metric_name: str, meta: dict[str, Any]) -> MetricResult:
                     ))
                     silver_pass = False
         else:
-            layer_data = meta.get(layer, {})
+            layer_data = meta.get(layer) or {}
             for f in fields:
-                if not layer_data.get(f):
+                if _field_state(layer_data, f) != "populated":
                     findings.append(Finding(
                         level="info",
                         rule="missing_recommended_field",

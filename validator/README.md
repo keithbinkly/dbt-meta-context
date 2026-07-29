@@ -104,7 +104,7 @@ repos:
 
 | Rule | Tier | Description |
 |------|------|-------------|
-| Core fields present | Bronze | All 13 Core fields populated |
+| Core fields present | Bronze | All 13 Core fields populated. **Absent ≠ intentionally null:** an explicit `null` on an `expectations` field validates clean (info) when `decisions.business_rules` documents the external source of the values — the [Gap 1](../spec/known-gaps.md) contract-scoped pattern. A null without that justification, or in any other layer, is an error. `0` / `0.0` / `false` count as populated (a threshold of 0 is a threshold). |
 | healthy_range type | Bronze | Must be [number, number] |
 | causal_dimensions structure | Bronze | Each entry must have name, why, priority |
 | correlates_with relationship typed | Bronze | relationship must be a string describing direction/type |

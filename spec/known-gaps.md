@@ -62,7 +62,52 @@ meta:
 
 This signals to the AI agent that a blanket numeric threshold would be wrong, and points to the external source of truth.
 
-### Fallback schema extension (RFC stage — high-cardinality contracts only)
+**Validator note (fixed in response to [issue #1](https://github.com/keithbinkly/dbt-meta-context/issues/1)):** the validator now distinguishes *absent* from *intentionally null*. An explicit `warning_threshold: null` validates clean (info-level `intentional_null`) when `decisions.business_rules` documents the external source, per this workaround; a null without that justification is an error (`unjustified_null`). Earlier versions scored the workaround's own recommended pattern as a missing Core field.
+
+### First real-world example (2026-07: regulated public transport, ~30 regulatory KPIs)
+
+The Gap 1 deployment reported back in [issue #1](https://github.com/keithbinkly/dbt-meta-context/issues/1): ~30 service-quality KPIs defined by the Italian transport regulator (ART Resolution 53/2024), one metric per KPI, thresholds and penalties set per contract and per segment. Applying the tidy rule across the full catalog produced **zero forked metrics** — every case reduced to "look up the threshold and penalty rule for this contract, compare, compute." Four recurring flavors of "values change," none of which fork the metric:
+
+1. **Per contract and per period** — registry rows with validity dates (`valid_from`/`valid_to`), e.g. a punctuality threshold of 90 in a contract's first year, 95 thereafter.
+2. **Per population segment** — the segment becomes a dimension in the semantic model and a key column in the registry; one decision regime, dual structure.
+3. **A parameter inside the formula varies by row attribute** — e.g. on-time tolerance of 5 min urban / 10 min suburban. Computed row-by-row in the mart; one measure, one metric; the card documents the parameterization.
+4. **The regulation restricts the population** — MetricFlow `filter:` defines the metric's population; part of the definition, not a regime split.
+
+Where genuine splits exist, the regulator had already made them (distinct KPI codes → distinct cards). Their registry: one row per (contract, indicator, segment, validity window), with a closed `penalty_type` vocabulary and CI checks on indicator ids, segment axes, and non-overlapping validity windows.
+
+### Proposed direction: `expectations_source` registry pointer (supersedes `contract_overlays` as the preferred RFC)
+
+The same deployment proposes replacing the prose pointer ("see contract_sla_registry") with a machine-readable one, currently namespaced outside the canonical vocabulary per the no-invented-keys rule:
+
+```yaml
+meta:
+  expectations:
+    warning_threshold: null   # contract- and segment-scoped
+  decisions:
+    business_rules: |
+      Thresholds and penalties are set per contract (and per segment).
+      Never use a blanket number: resolve via the registry pointer below.
+  <vendor_namespace>:
+    expectations_source:
+      model: reg_contract_indicator
+      key: [contract_id, indicator_id, segment]
+      effective_dating: [valid_from, valid_to]
+      field_mapping:
+        warning_threshold: threshold
+        comparison: comparison
+        penalty_type: penalty_type
+        penalty_value: penalty_value
+```
+
+An agent resolves "is contract X meeting its SLA?" to a mechanically built lookup — no table-name guessing, no column guessing, validity dates respected. Three properties make this the preferred direction over embedded `contract_overlays`:
+
+- **Works at any cardinality** — hundreds of contracts stay in the governed, versioned registry; the card never grows.
+- **Gap 4 synergy** — with embedded overlays, card size grows with contracts × segments, worsening context flooding; with a pointer, every card is constant-size and the orchestrator fetches only the relevant registry rows.
+- **Machine-checkable justification for nulls** — a structured pointer is the natural marker that lets a validator distinguish "intentionally null, resolved externally" from "missing" (today the validator uses `business_rules` presence as the justification signal; a promoted `expectations_source` would be the stronger contract).
+
+Status: gathering a second real-world example before freezing the field structure (the [field guide](field-guide.md) 4-test framework applies). If you run a registry-pointer pattern in production, open an issue.
+
+### Fallback schema extension (RFC stage — high-cardinality contracts only, now second preference)
 
 A `contract_overlays` key on `decisions` that provides per-tier threshold overrides:
 
@@ -155,6 +200,15 @@ The validator behavior:
 - `valid_until` present + today ≥ `valid_until`: **error** (exit code 1), not just a warning
 
 This lets regulated environments set hard expiry gates in CI without waiting for the 90-day staleness heuristic.
+
+### Two clocks — don't conflate them
+
+Field report from the Gap 1 deployment ([issue #1](https://github.com/keithbinkly/dbt-meta-context/issues/1)): temporal validity has **two separate clocks**, and conflating them is a natural first instinct that turns out wrong.
+
+1. **Validity dates on the values** (registry rows' `valid_from`/`valid_to`) — which threshold was *in force on the service date*. This drives the declared KPI value and belongs with the data, not the card.
+2. **`valid_until` on the card** — freshness of the card's own *text* (definitions, investigation paths, rules prose). This is what this gap's proposal governs.
+
+A card can be perfectly fresh while pointing at values whose in-force window changed, and vice versa. Design for both clocks independently.
 
 ### Workaround (current best practice)
 
