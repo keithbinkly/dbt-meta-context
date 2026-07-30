@@ -11,7 +11,7 @@ These are schema limitations we know about and are actively working on. They are
 ## Gap 1: Multi-tenancy / per-contract threshold overlays
 
 **Status:** Largely resolved by modeling practice (the tidy rule); `contract_overlays` RFC remains as the fallback for high-cardinality cases
-**Raised by:** Production deployment in regulated public-transport domain
+**Raised by:** A pre-production field report from a regulated public-transport deployment (design-and-development phase, not production metrics)
 
 ### The problem
 

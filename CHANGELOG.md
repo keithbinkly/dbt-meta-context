@@ -56,7 +56,7 @@ Documentation and tooling release. **No schema field changes** — the Core key 
 
 ## [0.1.0] — 2026-06-09
 
-Initial public release. This is the schema as described in the [eval](eval/) and validated in a production financial-services deployment.
+Initial public release. This is the schema as described in the [eval](eval/) and piloted in a financial-services deployment during its design phase.
 
 ### Schema (36 fields across 5 layers)
 
@@ -117,7 +117,7 @@ Full results at [`eval/results.md`](eval/results.md). Key numbers from the 6-var
 - Bare YAML (V0): 0.2 on calibration, 0.1 on decision-quality
 - Full meta (V5): 0.9 on calibration, 0.8 on decision-quality
 - Haiku + full meta (4.7) > Opus + docs (4.6): capability gap closes with structured context
-- Distillation from source docs: 5.6× compression, LLM-extracted meta (C1b) matches hand-authored meta (C1c)
+- Distillation from source docs: 4.1× compression, LLM-extracted meta (C1b) matches hand-authored meta (C1c)
 
 ---
 
