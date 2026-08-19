@@ -46,7 +46,7 @@ C1b tests whether a frontier model can extract meta context from scattered docs 
 | Model gap with meta context | 0.2 points |
 | Meta lift — Haiku (C0 → C1b) | +2.4 points |
 | Meta lift — Opus (C0 → C1b) | +1.8 points |
-| Distillation ratio (C3 → C1b word count) | 5.6× compression |
+| Distillation ratio (C3 → C1b word count) | 4.1× compression |
 | C1b vs C1c | C1b ≥ C1c across all 3 models |
 
 ---
