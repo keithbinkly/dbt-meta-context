@@ -20,13 +20,18 @@ LAYERS = ("context", "expectations", "investigation", "relationships", "decision
 
 
 def _meta_of(node: dict) -> dict:
-    """Read a node's meta block in whichever shape the project writes it.
+    """Read a node's meta block from whichever location the project writes it.
 
-    dbt Fusion's inline spec nests it under `config.meta` (both for models and
-    for `models[].metrics[]`); the legacy semantic-model spec writes a bare
-    `meta`. Real projects use both, so read both rather than assuming a house
-    style — reading only one shape reports "0 metrics, exit 0" on a fully
-    populated file, which is worse than an error.
+    dbt Fusion's inline spec nests it under `config.meta` (for models and for
+    `models[].metrics[]` alike); the legacy semantic-model spec writes a bare
+    `meta`. Both shapes are in the wild, and looking in only one reports
+    "0 metrics, exit 0" on a fully populated file — worse than an error.
+
+    A populated `config.meta` wins; a bare `meta` is the fallback. An empty
+    `config.meta` is not a statement, so it does not suppress a populated bare
+    `meta`. If both are populated the bare one is NOT merged in — dbt compiles
+    one of them, not their union, and silently validating a card the warehouse
+    never sees would be its own false clean.
     """
     if not isinstance(node, dict):
         return {}
@@ -39,24 +44,31 @@ def _meta_of(node: dict) -> dict:
 
 
 def _model_metrics(model: dict) -> list[dict]:
-    """Metric nodes of a model, from both the legacy and inline locations.
+    """Metric nodes of a model, from both the inline and legacy locations.
 
-    Deduped by name: a metric declared in both places is one metric.
+    Named metrics are deduped, inline-first: a name declared in both places is
+    one metric, and the inline (Fusion) declaration is the one dbt compiles
+    today, so it is the one we validate. dbt itself rejects the duplicate at
+    parse time — this only decides what the validator reports in the meantime.
+
+    Unnamed metrics are never deduped. They all report as "unknown", and
+    collapsing them would silently drop every metric after the first.
     """
     semantic = model.get("semantic_model")
     sources = (
-        (semantic.get("metrics") if isinstance(semantic, dict) else None),
         model.get("metrics"),
+        (semantic.get("metrics") if isinstance(semantic, dict) else None),
     )
     metrics, seen = [], set()
     for source in sources:
         for metric in source or []:
             if not isinstance(metric, dict):
                 continue
-            name = metric.get("name", "unknown")
-            if name in seen:
-                continue
-            seen.add(name)
+            name = metric.get("name")
+            if name is not None:
+                if name in seen:
+                    continue
+                seen.add(name)
             metrics.append(metric)
     return metrics
 
@@ -120,7 +132,11 @@ def validate(path: str, output_format: str, errors_only: bool):
         try:
             content = yaml.safe_load(yaml_file.read_text())
         except yaml.YAMLError as e:
+            # A file we could not read is not a file that passed. Reporting
+            # "0 metrics" and exiting 0 here would be the same false clean the
+            # extractor was fixed to stop producing.
             click.echo(f"Error parsing {yaml_file}: {e}", err=True)
+            exit_code = max(exit_code, 1)
             continue
 
         if not content:

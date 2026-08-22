@@ -13,8 +13,9 @@ the content is synthetic.
 """
 
 import yaml
+from click.testing import CliRunner
 
-from meta_context_validator.cli import _extract_metrics
+from meta_context_validator.cli import _extract_metrics, main
 from meta_context_validator.rules import validate_metric
 
 
@@ -106,11 +107,38 @@ def test_legacy_shape_still_extracted():
     assert metrics["order_count"]["last_validated"] == "2026-08-21"
 
 
-def test_same_metric_in_both_locations_counted_once():
+def test_same_metric_in_both_locations_resolves_to_the_inline_one():
+    """dbt compiles the inline declaration, so that is the one we validate."""
     doc = yaml.safe_load(FUSION_INLINE)
-    doc["models"][0]["semantic_model"]["metrics"] = [{"name": "order_count"}]
-    names = [name for name, _ in _extract_metrics(doc)]
-    assert names.count("order_count") == 1
+    doc["models"][0]["semantic_model"]["metrics"] = [
+        {"name": "order_count", "meta": {"context": {"purpose": "legacy copy"}}}
+    ]
+    metrics = _extract_metrics(doc)
+    assert [n for n, _ in metrics].count("order_count") == 1
+    # The inline card inherits the model-level purpose; the legacy copy would
+    # have overridden it.
+    assert _by_name(metrics)["order_count"]["context"]["purpose"] == "Daily order outcomes"
+
+
+def test_unnamed_metrics_are_not_deduped():
+    """Collapsing them would silently drop every metric after the first."""
+    doc = yaml.safe_load("""
+models:
+  - name: m
+    metrics:
+      - config: {meta: {context: {purpose: first}}}
+      - config: {meta: {context: {purpose: second}}}
+""")
+    metrics = _extract_metrics(doc)
+    assert [m["context"]["purpose"] for _, m in metrics] == ["first", "second"]
+
+
+def test_unparseable_file_exits_nonzero(tmp_path):
+    """A file we could not read is not a file that passed."""
+    broken = tmp_path / "broken.yml"
+    broken.write_text("models:\n  - name: m\n    config:\n      meta: [unclosed\n")
+    result = CliRunner().invoke(main, ["validate", str(broken)])
+    assert result.exit_code != 0
 
 
 def test_top_level_metric_reads_config_meta():
