@@ -18,6 +18,8 @@ def _find_yaml_files(path: Path) -> list[Path]:
 
 LAYERS = ("context", "expectations", "investigation", "relationships", "decisions")
 
+_ABSENT = object()
+
 
 def _meta_of(node: dict) -> dict:
     """Read a node's meta block from whichever location the project writes it.
@@ -76,12 +78,23 @@ def _model_metrics(model: dict) -> list[dict]:
 def _merge_meta(model_level: dict, metric_meta: dict) -> dict:
     """Merge model-level meta under metric-level meta (metric wins on conflict).
 
-    `or {}` throughout — a layer set to explicit null must not crash the walk.
+    A layer written as an explicit null on the metric is a tombstone: it breaks
+    inheritance for that layer instead of being backfilled from the model. The
+    alternative is worse than a gap — a metric that says it has no expectations
+    would be scored against the model's thresholds, which is the false
+    confidence this tool exists to catch. `_field_state` in rules.py draws the
+    same absent-vs-explicitly-null line one level down.
     """
     merged = {}
     for layer in LAYERS:
+        metric_layer = metric_meta.get(layer, _ABSENT)
+        if metric_layer is None:
+            merged[layer] = {}
+            continue
         model_layer = model_level.get(layer) or {}
-        metric_layer = metric_meta.get(layer) or {}
+        if metric_layer is _ABSENT or not isinstance(metric_layer, dict):
+            merged[layer] = {**model_layer}
+            continue
         merged[layer] = {**model_layer, **metric_layer}
     if metric_meta.get("last_validated"):
         merged["last_validated"] = metric_meta["last_validated"]
@@ -96,10 +109,11 @@ def _extract_metrics(yaml_content: dict) -> list[tuple[str, dict]]:
     for model in yaml_content.get("models") or []:
         if not isinstance(model, dict):
             continue
-        # The model-level card: legacy puts it on `semantic_model.meta`,
-        # Fusion on the model's own `config.meta`.
+        # The model-level card: Fusion puts it on the model's own `config.meta`,
+        # legacy on `semantic_model.meta`. Inline first, matching the metric-level
+        # precedence in _model_metrics — the two must not disagree.
         semantic = model.get("semantic_model")
-        model_level_meta = _meta_of(semantic) or _meta_of(model)
+        model_level_meta = _meta_of(model) or _meta_of(semantic)
         for metric in _model_metrics(model):
             name = metric.get("name", "unknown")
             results.append((name, _merge_meta(model_level_meta, _meta_of(metric))))
@@ -130,8 +144,8 @@ def validate(path: str, output_format: str, errors_only: bool):
 
     for yaml_file in yaml_files:
         try:
-            content = yaml.safe_load(yaml_file.read_text())
-        except yaml.YAMLError as e:
+            content = yaml.safe_load(yaml_file.read_text(encoding="utf-8"))
+        except (yaml.YAMLError, UnicodeDecodeError, OSError) as e:
             # A file we could not read is not a file that passed. Reporting
             # "0 metrics" and exiting 0 here would be the same false clean the
             # extractor was fixed to stop producing.

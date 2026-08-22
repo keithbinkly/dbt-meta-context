@@ -153,12 +153,45 @@ metrics:
     assert _by_name(_extract_metrics(doc))["refund_rate"]["context"]["purpose"]
 
 
-def test_explicit_null_layer_does_not_crash():
+def test_explicit_null_layer_breaks_inheritance():
+    """An explicit null is a tombstone, not a gap to backfill from the model.
+
+    Backfilling would score a metric that says it has no expectations against
+    the model's thresholds — the false confidence this tool exists to catch.
+    """
     doc = yaml.safe_load(FUSION_INLINE)
     doc["models"][0]["metrics"][0]["config"]["meta"]["expectations"] = None
     metrics = _by_name(_extract_metrics(doc))
-    # Model-level expectations survive; the null metric layer contributes nothing.
-    assert metrics["order_count"]["expectations"] == {"seasonality": "Peaks in Q4"}
+    assert metrics["order_count"]["expectations"] == {}
+    # Layers the metric simply does not mention still inherit.
+    assert metrics["order_count"]["decisions"]["business_rules"]
+
+
+def test_model_level_inline_card_wins_over_legacy():
+    """Model-level precedence must agree with metric-level precedence."""
+    doc = yaml.safe_load("""
+models:
+  - name: m
+    config:
+      meta: {context: {purpose: inline}}
+    semantic_model:
+      meta: {context: {purpose: legacy}}
+    metrics:
+      - name: x
+""")
+    assert _by_name(_extract_metrics(doc))["x"]["context"]["purpose"] == "inline"
+
+
+def test_undecodable_file_fails_that_file_not_the_run(tmp_path):
+    """One bad byte must not abort validation of every other file."""
+    (tmp_path / "bad.yml").write_bytes(b'models:\n  - name: m\n    description: "\xd2"\n')
+    (tmp_path / "good.yml").write_text(
+        "metrics:\n  - name: refund_rate\n    meta:\n      context:\n        purpose: p\n"
+    )
+    result = CliRunner().invoke(main, ["validate", str(tmp_path)])
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+    assert result.exit_code != 0
+    assert "refund_rate" in result.output
 
 
 def test_false_confidence_fires_on_fusion_shape():
