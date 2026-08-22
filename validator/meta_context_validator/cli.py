@@ -16,32 +16,86 @@ def _find_yaml_files(path: Path) -> list[Path]:
     return sorted(path.rglob("*.yml")) + sorted(path.rglob("*.yaml"))
 
 
+LAYERS = ("context", "expectations", "investigation", "relationships", "decisions")
+
+
+def _meta_of(node: dict) -> dict:
+    """Read a node's meta block in whichever shape the project writes it.
+
+    dbt Fusion's inline spec nests it under `config.meta` (both for models and
+    for `models[].metrics[]`); the legacy semantic-model spec writes a bare
+    `meta`. Real projects use both, so read both rather than assuming a house
+    style — reading only one shape reports "0 metrics, exit 0" on a fully
+    populated file, which is worse than an error.
+    """
+    if not isinstance(node, dict):
+        return {}
+    config = node.get("config") or {}
+    config_meta = config.get("meta") if isinstance(config, dict) else None
+    if isinstance(config_meta, dict) and config_meta:
+        return config_meta
+    meta = node.get("meta")
+    return meta if isinstance(meta, dict) else {}
+
+
+def _model_metrics(model: dict) -> list[dict]:
+    """Metric nodes of a model, from both the legacy and inline locations.
+
+    Deduped by name: a metric declared in both places is one metric.
+    """
+    semantic = model.get("semantic_model")
+    sources = (
+        (semantic.get("metrics") if isinstance(semantic, dict) else None),
+        model.get("metrics"),
+    )
+    metrics, seen = [], set()
+    for source in sources:
+        for metric in source or []:
+            if not isinstance(metric, dict):
+                continue
+            name = metric.get("name", "unknown")
+            if name in seen:
+                continue
+            seen.add(name)
+            metrics.append(metric)
+    return metrics
+
+
+def _merge_meta(model_level: dict, metric_meta: dict) -> dict:
+    """Merge model-level meta under metric-level meta (metric wins on conflict).
+
+    `or {}` throughout — a layer set to explicit null must not crash the walk.
+    """
+    merged = {}
+    for layer in LAYERS:
+        model_layer = model_level.get(layer) or {}
+        metric_layer = metric_meta.get(layer) or {}
+        merged[layer] = {**model_layer, **metric_layer}
+    if metric_meta.get("last_validated"):
+        merged["last_validated"] = metric_meta["last_validated"]
+    elif model_level.get("last_validated"):
+        merged["last_validated"] = model_level["last_validated"]
+    return merged
+
+
 def _extract_metrics(yaml_content: dict) -> list[tuple[str, dict]]:
     """Extract (metric_name, meta_dict) pairs from a parsed YAML file."""
     results = []
-    models = yaml_content.get("models", [])
-    for model in models:
-        semantic = model.get("semantic_model", {})
-        model_level_meta = semantic.get("meta", {})
-        for metric in semantic.get("metrics", []):
+    for model in yaml_content.get("models") or []:
+        if not isinstance(model, dict):
+            continue
+        # The model-level card: legacy puts it on `semantic_model.meta`,
+        # Fusion on the model's own `config.meta`.
+        semantic = model.get("semantic_model")
+        model_level_meta = _meta_of(semantic) or _meta_of(model)
+        for metric in _model_metrics(model):
             name = metric.get("name", "unknown")
-            metric_meta = metric.get("meta", {})
-            # Merge model-level meta under metric-level (metric wins on conflict)
-            merged = {}
-            for layer in ("context", "expectations", "investigation", "relationships", "decisions"):
-                model_layer = model_level_meta.get(layer, {})
-                metric_layer = metric_meta.get(layer, {})
-                merged[layer] = {**model_layer, **metric_layer}
-            if model_level_meta.get("last_validated") and not metric_meta.get("last_validated"):
-                merged["last_validated"] = model_level_meta["last_validated"]
-            elif metric_meta.get("last_validated"):
-                merged["last_validated"] = metric_meta["last_validated"]
-            results.append((name, merged))
+            results.append((name, _merge_meta(model_level_meta, _meta_of(metric))))
     # Also handle top-level metrics blocks
-    for metric in yaml_content.get("metrics", []):
-        name = metric.get("name", "unknown")
-        meta = metric.get("meta", {})
-        results.append((name, meta))
+    for metric in yaml_content.get("metrics") or []:
+        if not isinstance(metric, dict):
+            continue
+        results.append((metric.get("name", "unknown"), _meta_of(metric)))
     return results
 
 
