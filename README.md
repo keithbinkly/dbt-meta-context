@@ -189,6 +189,16 @@ If you have existing runbooks, post-mortems, or onboarding docs, a frontier mode
 
 The install command at the top adds [`skills/authoring-meta-context/`](skills/authoring-meta-context/) to your agent, which then auto-loads the authoring workflow whenever you ask about context cards or meta context. The skill is a thin navigation layer over the guides in this repo — updating the guides updates the skill.
 
+## Read more
+
+The write-ups behind this schema, on [data-centered.com](https://data-centered.com/):
+
+- [Meta:Context — the project page](https://data-centered.com/meta-context/): the five layers, the evidence, and the current caveats.
+- [Context Tools on Six Axes: What Gets Structured, and What Stays Prose](https://data-centered.com/journal/context-tools-six-axes-20260824.html): sixteen context products and formats compared on six axes; metric-level judgment still lives mainly in prose.
+- [What Context-Layer Tools Leave Out, According to the Ontologists](https://data-centered.com/journal/what-context-layer-tools-leave-out-20260717.html): the four capabilities the formal-semantics camp says the new tools are missing, and the postures this schema adopts in response.
+- [What We're Reading: Data Agents, From Semantics to Judgment](https://data-centered.com/journal/data-agents-semantics-to-judgment-20260911.html): seven recent pieces on what happens between a question and an answer.
+- [The New Context Layers: Names and Joins (and that's about it)](https://data-centered.com/journal/context-layer-field-guide-20260609.html): the field guide that motivated the five layers.
+
 ## Contributing
 
 We welcome schema extensions. All proposed fields must pass the 4-test framework in [`spec/field-guide.md`](spec/field-guide.md) and be validated against an eval fixture. See [`CONTRIBUTING.md`](CONTRIBUTING.md).
